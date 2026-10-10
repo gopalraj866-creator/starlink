@@ -156,7 +156,7 @@ def earth_geometry():
     world = view @ RT_INV.T
     lon = np.arctan2(world[..., 1], world[..., 0])
     lat = np.arcsin(np.clip(world[..., 2], -1, 1))
-    sun_view = np.array([0.62, -0.70, 0.30])
+    sun_view = np.array([0.30, -0.88, 0.38])
     sun_view /= np.linalg.norm(sun_view)
     ndl = (view * sun_view).sum(-1)
     return dict(mask=mask, w=w, lon=lon, lat=lat, ndl=ndl, size=size)
@@ -180,8 +180,8 @@ _ndl = EG["ndl"][_M]
 _w = EG["w"][_M]
 ROW_M = np.clip(((0.5 - EG["lat"][_M] / math.pi) * TH).astype(np.int32), 0, TH - 1)
 LON_M = EG["lon"][_M].astype(np.float32)
-DAYW_M = _smooth(-0.12, 0.30, _ndl).astype(np.float32)[:, None]
-DIFF_M = ((0.30 + 0.85 * np.clip(_ndl, 0, 1)) * (0.60 + 0.40 * _w ** 0.4)).astype(np.float32)[:, None]
+DAYW_M = _smooth(-0.30, 0.10, _ndl).astype(np.float32)[:, None]
+DIFF_M = ((0.55 + 0.80 * np.clip(_ndl, 0, 1)) * (0.70 + 0.30 * _w ** 0.4)).astype(np.float32)[:, None]
 RIM_M = (((1 - _w) ** 3.0)[:, None] * (0.35 + 0.65 * DAYW_M) * np.array([40, 110, 255], np.float32)).astype(np.float32)
 DAY_K = DIFF_M * DAYW_M
 NIGHT_K = 1.0 - DAYW_M
@@ -220,7 +220,7 @@ def make_orbit_lines():
                 if vis[i] and vis[i + 1]:
                     c = (40, 105, 235) if front[i] else (18, 50, 125)
                     d.line([(sx[i], sy[i]), (sx[i + 1], sy[i + 1])], fill=c, width=1)
-    arr = np.array(layer.filter(ImageFilter.GaussianBlur(0.4)), np.float32) * 0.55
+    arr = np.array(layer.filter(ImageFilter.GaussianBlur(0.4)), np.float32) * 0.32
     return arr, P
 
 
@@ -275,11 +275,8 @@ def build_background():
            for t in np.linspace(0.0, 1.0, 120)]
     pts = [(x, y) for x, y in pts if 0 <= x < W and 0 <= y < H]
     dashed_curve(d, pts)
-    moon = make_moon(mr)
-    bg.alpha_composite(moon, (mx - mr, my - mr))
-    d.line([(mx + mr - 2, my + 6), (mx + mr + 26, my - 14), (mx + mr + 112, my - 14)], fill=(60, 120, 230), width=1)
-    d.text((mx + mr + 30, my - 40), "Moon", font=font(13, True), fill=(235, 240, 250))
-    d.text((mx + mr + 30, my - 10), "384,400 km", font=font(11), fill=(110, 160, 255))
+    global MOON_PTS
+    MOON_PTS = pts
 
     # --- Title block (top left) ---
     d.text((30, 28), "STARLINK CONSTELLATION", font=font(25, True), fill=(245, 248, 255))
@@ -338,6 +335,69 @@ BG = build_background()
 F12, F12B, F11 = font(12), font(12, True), font(11)
 
 
+
+MOON_SPRITE = make_moon(30)
+FACTS = [
+    "Starlink is the largest satellite constellation ever built",
+    "Each Starlink satellite circles Earth every ~95 minutes",
+    "Starlink satellites travel at about 7.6 km/s (27,000 km/h)",
+    "The Moon is ~384,400 km away, about 60x farther than Starlink orbits",
+    "Starlink orbits at ~550 km in Low Earth Orbit (LEO)",
+    "Falcon 9 rockets launch up to ~25 Starlink satellites at a time",
+    "Starlink satellites use ion thrusters to raise and lower their orbit",
+    "Orbit heights in this simulation are exaggerated so you can see them",
+    "Satellites at lower altitude re-enter and burn up at end of life",
+    "Lower orbit means lower latency: internet from space in ~30 ms",
+]
+FACT_SECS = 14.0
+F_FACT, F_HL, F_HLB = font(15), font(12), font(12, True)
+F_MOONB, F_MOON = font(13, True), font(11)
+
+
+def draw_overlays(frame, t, sx, sy, vis, behind, act):
+    img = Image.fromarray(frame)
+    d = ImageDraw.Draw(img, "RGBA")
+
+    # Moon drifting slowly along its dashed orbit
+    pts = MOON_PTS
+    k = 0.42 + 0.22 * math.sin(t / 110.0)
+    mx, my = pts[int(k * (len(pts) - 1))]
+    img.paste(MOON_SPRITE, (int(mx) - 30, int(my) - 30), MOON_SPRITE)
+    d.line([(mx + 28, my + 6), (mx + 52, my - 14), (mx + 130, my - 14)], fill=(60, 120, 230, 255), width=1)
+    d.text((mx + 56, my - 38), "Moon", font=F_MOONB, fill=(235, 240, 250, 255))
+    d.text((mx + 56, my - 10), f"{384400 + int(9000 * math.sin(t / 110.0 + 1)):,} km", font=F_MOON, fill=(110, 160, 255, 255))
+
+    # Highlighted satellite (changes every 12 s)
+    cyc = int(t // 12)
+    cand = np.nonzero(vis & act & ~behind)[0]
+    if len(cand):
+        i = int(np.random.default_rng(cyc).choice(cand))
+        if vis[i] and not behind[i]:
+            px, py = PX0 + int(sx[i]), PY0 + int(sy[i])
+            ph = (t % 12) / 12.0
+            pulse = 7 + 5 * math.sin(t * 5)
+            fade = min(1.0, ph * 6, (1 - ph) * 6)
+            a_ = int(255 * fade)
+            d.ellipse([px - pulse, py - pulse, px + pulse, py + pulse], outline=(255, 210, 90, a_), width=2)
+            dx = 46 if px < CX + 40 else -46
+            ex, ey = px + dx, py - 34
+            d.line([(px + (7 if dx > 0 else -7), py - 6), (ex, ey), (ex + (110 if dx > 0 else -110), ey)], fill=(255, 210, 90, a_), width=1)
+            tx = ex + 4 if dx > 0 else ex - 108
+            alt = 540 + (float(SATS["r"][i]) - 1.26) / 0.12 * 30
+            d.rounded_rectangle([tx - 5, ey - 20, tx + 116, ey + 22], radius=5, fill=(6, 10, 20, int(200 * fade)))
+            d.text((tx, ey - 16), f"STARLINK-{4000 + i}", font=F_HLB, fill=(255, 225, 130, a_))
+            d.text((tx, ey + 3), f"Alt {alt:.0f} km  |  7.6 km/s", font=F_HL, fill=(220, 225, 240, a_))
+
+    # Fun-fact ticker (fades in/out)
+    n = int(t // FACT_SECS)
+    ph = (t % FACT_SECS) / FACT_SECS
+    fa = int(255 * min(1.0, ph * 8, (1 - ph) * 8))
+    txt = FACTS[n % len(FACTS)]
+    d.rounded_rectangle([250, 676, 1000, 710], radius=8, fill=(6, 10, 20, int(190 * fa / 255)))
+    d.text((625, 693), "DID YOU KNOW?  " + txt, font=F_FACT, fill=(235, 242, 255, fa), anchor="mm")
+    frame[:] = np.asarray(img)
+
+
 def draw_live(frame, n_view, now):
     x0, y0, x1, y1 = PANEL
     reg = Image.fromarray(frame[y0 + 2:y0 + 36, x0 + 80:x1 - 2].copy())
@@ -365,7 +425,7 @@ WHITE = np.array([255, 255, 255], np.float32)
 BLUE = np.array([60, 140, 255], np.float32)
 
 
-def render_frame(t, now):
+def render_frame(t, now, overlays=True):
     frame = BG.copy()
     theta = math.radians(SPIN_DEG_PER_SEC) * t
 
@@ -399,6 +459,8 @@ def render_frame(t, now):
     frame[PY0:PY0 + PS, PX0:PX0 + PS] = np.clip(pr, 0, 255).astype(np.uint8)
 
     draw_live(frame, n_view, now)
+    if overlays:
+        draw_overlays(frame, t, sx, sy, vis, behind, act)
     return frame
 
 
@@ -409,25 +471,56 @@ def ffmpeg_cmd(args):
     base = ["ffmpeg", "-hide_banner", "-loglevel", "warning",
             "-re", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-"]
     if args.rtmp:
-        base += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+        audio = os.environ.get("AUDIO_URL", "").strip()
+        if audio:
+            base += ["-stream_loop", "-1", "-i", audio]
+        else:
+            base += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
         return base + ["-c:v", "libx264", "-preset", os.environ.get("X264_PRESET", "veryfast"),
                        "-pix_fmt", "yuv420p", "-b:v", "3000k", "-maxrate", "3500k", "-bufsize", "7000k",
-                       "-g", str(FPS * 2), "-keyint_min", str(FPS * 2), "-sc_threshold", "0",
+                       "-map", "0:v", "-map", "1:a", "-g", str(FPS * 2), "-keyint_min", str(FPS * 2), "-sc_threshold", "0",
                        "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
                        "-f", "flv", args.rtmp]
     base.remove("-re")
     return base + ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-y", args.out]
 
 
+
+def make_thumbnail(path):
+    f = render_frame(300.0, dt.datetime.now(dt.timezone.utc), overlays=False)
+    img = Image.fromarray(f).convert("RGB")
+    # zoom on the globe
+    box = (CX - 340, CY - 190, CX + 340, CY + 190)
+    img = img.crop(box).resize((1280, 720), Image.LANCZOS)
+    ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    d.rectangle([0, 0, 1280, 720], fill=(0, 0, 0, 70))
+    d.rounded_rectangle([40, 40, 220, 100], radius=10, fill=(220, 30, 30, 255))
+    d.ellipse([56, 60, 76, 80], fill=(255, 255, 255, 255))
+    d.text((90, 52), "LIVE", font=font(36, True), fill=(255, 255, 255, 255))
+    for i, (txt, sz, col) in enumerate([("10,000", 140, (255, 255, 255)), ("STARLINK", 92, (90, 170, 255)),
+                                         ("SATELLITES IN ORBIT", 50, (255, 255, 255))]):
+        y = [395, 545, 650][i] - 40
+        d.text((43, y + 3), txt, font=font(sz, True), fill=(0, 0, 0, 200))
+        d.text((40, y), txt, font=font(sz, True), fill=col + (255,))
+    img = Image.alpha_composite(img.convert("RGBA"), ov).convert("RGB")
+    img.save(path)
+    print("saved", path)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--test-frame")
+    ap.add_argument("--thumbnail", help="write a YouTube thumbnail PNG")
     ap.add_argument("--frames", type=int, default=0, help="0 = run forever")
     ap.add_argument("--out", default="starlink_test.mp4")
     ap.add_argument("--rtmp", default=os.environ.get("RTMP_URL"))
     ap.add_argument("--seconds", type=float, default=0, help="stop after N seconds (live mode)")
     args = ap.parse_args()
 
+    if args.thumbnail:
+        make_thumbnail(args.thumbnail)
+        return
     if args.test_frame:
         f = render_frame(120.0, dt.datetime.now(dt.timezone.utc))
         Image.fromarray(f).save(args.test_frame)

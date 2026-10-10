@@ -14,6 +14,16 @@ standard GitHub Actions runner.
 4. Actions tab -> "Starlink Live Stream" -> Run workflow.
    It then restarts itself every 5 hours via cron.
 
+   Optional: add secret `AUDIO_URL` (direct .mp3 link, looped) for background music.
+   Without it the stream carries silent audio.
+
+## Thumbnail
+`python starlink_sim.py --thumbnail thumbnail.png` (a ready one is included).
+
+## What's on screen
+Highlighted satellite (changes every 12 s), rotating "Did you know?" facts,
+Moon drifting on its orbit, live UTC clock and satellites-in-view count.
+
 ## Local test
 ```bash
 pip install numpy pillow
