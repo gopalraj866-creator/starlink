@@ -1,0 +1,31 @@
+name: Starlink Live Stream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */5 * * *"   # restart every 5 hours (job below runs ~5h)
+
+concurrency:
+  group: starlink-live
+  cancel-in-progress: true   # new run replaces the old one
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345       # stop a bit before the 6h GitHub limit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          pip install numpy pillow
+
+      - name: Stream to YouTube
+        env:
+          RTMP_URL: ${{ secrets.YOUTUBE_RTMP_URL }}   # rtmp://a.rtmp.youtube.com/live2/<STREAM_KEY>
+          FPS: "30"
+          TIME_SCALE: "45"
+        run: |
+          python starlink_sim.py --rtmp "$RTMP_URL" --seconds 20400   # 5h40m
