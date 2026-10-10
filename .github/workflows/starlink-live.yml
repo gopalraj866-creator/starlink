@@ -26,6 +26,7 @@ jobs:
         env:
           RTMP_URL: ${{ secrets.YOUTUBE_RTMP_URL }}   # rtmp://a.rtmp.youtube.com/live2/<STREAM_KEY>
           FPS: "30"
+          AUDIO_URL: ${{ secrets.AUDIO_URL }}   # optional: direct .mp3 link (looped)
           TIME_SCALE: "45"
         run: |
           python starlink_sim.py --rtmp "$RTMP_URL" --seconds 20400   # 5h40m
